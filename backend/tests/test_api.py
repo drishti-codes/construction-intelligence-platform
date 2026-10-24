@@ -96,3 +96,60 @@ def test_weather_and_unknown():
 def test_chat():
     assert "PPE" in client.post("/api/chat", json={"message": "what ppe is needed?"}).json()["reply"]
     assert client.post("/api/chat", json={"message": ""}).status_code == 422
+
+
+# ---- AI retry / fallback behaviour (uses a fake client, no network) ----
+class _Resp:
+    def __init__(self, text):
+        self.text = text
+
+
+class _FakeModels:
+    def __init__(self, behaviours):
+        self.behaviours = list(behaviours)
+        self.calls = []
+
+    def generate_content(self, model, contents, config):
+        self.calls.append(model)
+        b = self.behaviours.pop(0)
+        if isinstance(b, Exception):
+            raise b
+        return _Resp(b)
+
+
+class _FakeClient:
+    def __init__(self, behaviours):
+        self.models = _FakeModels(behaviours)
+
+
+def test_retries_transient_503_then_succeeds(monkeypatch):
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    c = _FakeClient([RuntimeError("503 UNAVAILABLE high demand"), '{"ok": 1}'])
+    assert main._generate_json(c, "x") == {"ok": 1}
+    assert len(c.models.calls) == 2
+
+
+def test_falls_back_to_backup_model_on_permanent_error(monkeypatch):
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    monkeypatch.setenv("GEMINI_MODEL", "model-a")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "model-b")
+    c = _FakeClient([RuntimeError("404 NOT_FOUND"), '{"ok": 2}'])
+    assert main._generate_json(c, "x") == {"ok": 2}
+    assert c.models.calls == ["model-a", "model-b"]
+
+
+def test_gives_up_after_all_attempts(monkeypatch):
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    monkeypatch.setenv("GEMINI_MODEL", "model-a")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "model-b")
+    c = _FakeClient([RuntimeError("503 UNAVAILABLE")] * 6)
+    with pytest.raises(RuntimeError):
+        main._generate_json(c, "x")
+    assert len(c.models.calls) == 6
+
+
+def test_run_ai_falls_back_to_demo_when_ai_fails(monkeypatch):
+    monkeypatch.setattr(main.time, "sleep", lambda s: None)
+    monkeypatch.setattr(main, "_get_client", lambda: _FakeClient([RuntimeError("503 UNAVAILABLE")] * 6))
+    out = main.run_ai("p", None, main.CrackReport, main.demo_crack)
+    assert out["mode"] == "demo" and "AI unavailable" in out["warning"]

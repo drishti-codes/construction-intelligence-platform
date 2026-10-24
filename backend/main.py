@@ -7,6 +7,7 @@ the API falls back to a clearly labelled demo response so the UI never breaks.
 import io
 import json
 import os
+import time
 from typing import Dict, List, Literal, Optional
 from urllib.parse import quote
 
@@ -126,19 +127,44 @@ def _get_client():
     return genai.Client(api_key=key)
 
 
+def _is_transient(exc: Exception) -> bool:
+    """True for temporary Google-side problems worth retrying (overload / rate limit)."""
+    msg = str(exc)
+    return any(tok in msg for tok in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED", "500", "DEADLINE"))
+
+
 def _generate_json(client, contents) -> dict:
-    """Ask the model for JSON and parse it. Raises on any failure."""
+    """Ask the model for JSON and parse it.
+
+    Retries temporary errors (503/429) with a short back-off, then tries a backup
+    model (GEMINI_FALLBACK_MODEL) once. Raises if everything fails.
+    """
     from google.genai import types
 
-    resp = client.models.generate_content(
-        model=MODEL_NAME(),
-        contents=contents,
-        config=types.GenerateContentConfig(response_mime_type="application/json"),
-    )
-    text = (resp.text or "").strip()
-    if not text:
-        raise ValueError("Model returned an empty response")
-    return json.loads(text)
+    models = [MODEL_NAME()]
+    backup = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-flash-latest")
+    if backup and backup not in models:
+        models.append(backup)
+
+    last_exc: Optional[Exception] = None
+    for model in models:
+        for attempt in range(3):
+            try:
+                resp = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(response_mime_type="application/json"),
+                )
+                text = (resp.text or "").strip()
+                if not text:
+                    raise ValueError("Model returned an empty response")
+                return json.loads(text)
+            except Exception as exc:
+                last_exc = exc
+                if not _is_transient(exc):
+                    break  # permanent error for this model: try the backup model
+                time.sleep(1.5 * (attempt + 1))
+    raise last_exc  # type: ignore[misc]
 
 
 def _err(exc: Exception) -> str:
