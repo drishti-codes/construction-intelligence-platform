@@ -437,9 +437,17 @@ def _is_transient(exc: Exception) -> bool:
 
 
 def _is_timeout(exc: Exception) -> bool:
-    """A request that already ran out of time will not succeed if repeated on the same model."""
+    """Timeouts and quota errors (429) will not succeed if repeated at once on the same model,
+    so go straight to the backup model (each model has its own quota)."""
     name = type(exc).__name__
-    return _status_code(exc) in (408, 504) or "DEADLINE_EXCEEDED" in str(exc) or "Timeout" in name or isinstance(exc, TimeoutError)
+    msg = str(exc)
+    return (
+        _status_code(exc) in (408, 429, 504)
+        or "DEADLINE_EXCEEDED" in msg
+        or "RESOURCE_EXHAUSTED" in msg
+        or "Timeout" in name
+        or isinstance(exc, TimeoutError)
+    )
 
 
 def _is_key_problem(exc: Exception) -> bool:
