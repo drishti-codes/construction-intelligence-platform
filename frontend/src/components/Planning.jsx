@@ -1,80 +1,89 @@
 import React, { useState } from "react";
 import { planProject } from "../api.js";
-
-const fmt = (n) => Number(n).toLocaleString("en-IN");
+import { Banner, DownloadJson, ErrorMsg, L, Metric, fmt, useRequest } from "./ui.jsx";
 
 export default function Planning() {
-  const [form, setForm] = useState({ structure_type: "Residential", built_up_sqft: 1500, location_tier: 2, completion_pct: 30, floors: 2 });
-  const [plan, setPlan] = useState(null);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
+  const [form, setForm] = useState({ plot_size_sqft: 1000, construction_type: "Residential", city: "Pune", floors: 2 });
+  const [localError, setLocalError] = useState("");
+  const { data: plan, error, loading, run } = useRequest(planProject);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
-  const submit = async () => {
-    setError("");
-    setLoading(true);
-    try {
-      setPlan(await planProject({ ...form, built_up_sqft: Number(form.built_up_sqft), location_tier: Number(form.location_tier), completion_pct: Number(form.completion_pct), floors: Number(form.floors) }));
-    } catch (e) {
-      setError(e.message);
-      setPlan(null);
-    } finally {
-      setLoading(false);
-    }
+  const submit = () => {
+    setLocalError("");
+    if (!(Number(form.plot_size_sqft) > 0)) return setLocalError("Enter a plot size greater than 0.");
+    if (!form.city.trim()) return setLocalError("Enter the city / location.");
+    run({ ...form, plot_size_sqft: Number(form.plot_size_sqft), floors: Number(form.floors) || 1, city: form.city.trim() });
   };
+
+  const total = plan?.total_cost_inr || 0;
+  const m = plan?.materials || {};
 
   return (
     <section className="panel">
-      <h2>Planning & Real Estate Valuation</h2>
+      <h2>Project Planning</h2>
+      <p className="muted">Material estimate, cost in INR, schedule and a concept visualization.</p>
       <div className="grid">
-        <label>Structure type
-          <select value={form.structure_type} onChange={(e) => set("structure_type", e.target.value)}>
+        <label>Plot size (sq ft)
+          <input type="number" min="1" value={form.plot_size_sqft} onChange={(e) => set("plot_size_sqft", e.target.value)} />
+        </label>
+        <label>Construction type
+          <select value={form.construction_type} onChange={(e) => set("construction_type", e.target.value)}>
             <option>Residential</option><option>Commercial</option><option>Industrial</option>
           </select>
         </label>
-        <label>Built-up area (sqft)
-          <input type="number" min="1" value={form.built_up_sqft} onChange={(e) => set("built_up_sqft", e.target.value)} />
-        </label>
-        <label>Location tier
-          <select value={form.location_tier} onChange={(e) => set("location_tier", e.target.value)}>
-            <option value={1}>Tier 1 (metro)</option><option value={2}>Tier 2</option><option value={3}>Tier 3</option>
-          </select>
+        <label>City / location
+          <input value={form.city} maxLength={80} onChange={(e) => set("city", e.target.value)} />
         </label>
         <label>Floors
           <input type="number" min="1" max="50" value={form.floors} onChange={(e) => set("floors", e.target.value)} />
         </label>
-        <label>Completion: {form.completion_pct}%
-          <input type="range" min="0" max="100" value={form.completion_pct} onChange={(e) => set("completion_pct", e.target.value)} />
-        </label>
       </div>
-      <button onClick={submit} disabled={loading}>{loading ? "Calculating..." : "Calculate"}</button>
-      {error && <div className="error" role="alert">{error}</div>}
+      <button onClick={submit} disabled={loading}>{loading ? "Planning..." : "Generate plan"}</button>
+      <ErrorMsg error={localError || error} />
 
       {plan && (
         <div className="result">
+          <Banner r={plan} />
           <div className="metrics">
-            <div className="metric"><span>Total budget</span><b>{plan.total_budget_label}</b></div>
-            <div className="metric"><span>Spent</span><b>{plan.spent_label}</b></div>
-            <div className="metric"><span>Market valuation</span><b>{plan.market_valuation_label}</b></div>
+            <Metric label="Total cost">{plan.total_cost_label}</Metric>
+            <Metric label="Built-up area">{fmt(plan.built_up_sqft)} sq ft</Metric>
+            <Metric label="Duration">{fmt(plan.total_weeks)} weeks</Metric>
           </div>
-          <div className="bar"><div style={{ width: `${form.completion_pct}%` }} /></div>
+
+          <h4>Cost breakdown</h4>
+          <table>
+            <thead><tr><th>Item</th><th>Amount (INR)</th><th>Share</th></tr></thead>
+            <tbody>
+              {L(plan.cost_breakdown).map((c, i) => (
+                <tr key={i}><td>{c.item}</td><td>{fmt(c.amount_inr)}</td><td>{total ? Math.round((c.amount_inr / total) * 100) : 0}%</td></tr>
+              ))}
+            </tbody>
+          </table>
 
           <h4>Material estimate</h4>
           <ul className="plain">
-            {Object.entries(plan.materials).map(([k, v]) => <li key={k}>{k.replace(/_/g, " ")}: <b>{fmt(v)}</b></li>)}
+            <li>Cement (50 kg bags): <b>{fmt(m.cement_bags)}</b></li>
+            <li>Sand (cft): <b>{fmt(m.sand_cft)}</b></li>
+            <li>Aggregate (cft): <b>{fmt(m.aggregate_cft)}</b></li>
+            <li>Steel (kg): <b>{fmt(m.steel_kg)}</b></li>
+            <li>Bricks (nos): <b>{fmt(m.bricks_nos)}</b></li>
           </ul>
 
           <h4>Schedule</h4>
           <table>
-            <thead><tr><th>Phase</th><th>Weeks</th><th>Status</th></tr></thead>
-            <tbody>{plan.schedule.map((p) => <tr key={p.name}><td>{p.name}</td><td>{p.weeks}</td><td>{p.status}</td></tr>)}</tbody>
+            <thead><tr><th>Phase</th><th>Weeks</th><th>Work</th></tr></thead>
+            <tbody>{L(plan.schedule).map((p, i) => <tr key={i}><td>{p.name}</td><td>{fmt(p.weeks)}</td><td>{p.description}</td></tr>)}</tbody>
           </table>
 
-          <h4>Architectural visualization</h4>
-          <img className="preview" src={plan.visualization_url} alt="AI generated architectural concept" onError={(e) => { e.currentTarget.style.display = "none"; }} />
-
-          <details><summary>Assumptions</summary><ul>{plan.assumptions.map((a, i) => <li key={i}>{a}</li>)}</ul></details>
+          {plan.visualization_url && (
+            <>
+              <h4>Architectural visualization (concept)</h4>
+              <img className="preview" src={plan.visualization_url} alt="AI generated architectural concept" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            </>
+          )}
+          {plan.summary && <p className="summary">{plan.summary}</p>}
+          {L(plan.assumptions).length > 0 && <details><summary>Assumptions</summary><ul>{L(plan.assumptions).map((a, i) => <li key={i}>{a}</li>)}</ul></details>}
+          <DownloadJson data={plan} name="planning" />
         </div>
       )}
     </section>

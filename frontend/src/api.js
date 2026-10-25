@@ -17,28 +17,30 @@ async function parse(res) {
   return body;
 }
 
-export const getHealth = () => fetch(`${BASE}/api/health`).then(parse);
+async function request(path, options) {
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, options);
+  } catch {
+    throw new Error("Cannot reach the server. Check your internet and try again (the free server may take ~50 s to wake up).");
+  }
+  return parse(res);
+}
+
+const postJson = (path, payload) =>
+  request(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+
+export const getHealth = () => request("/api/health");
 
 export const analyzeImage = (endpoint, file, description) => {
   const form = new FormData();
   if (file) form.append("image", file);
   form.append("description", description || "");
-  return fetch(`${BASE}/api/${endpoint}`, { method: "POST", body: form }).then(parse);
+  return request(`/api/${endpoint}`, { method: "POST", body: form });
 };
 
-export const planProject = (payload) =>
-  fetch(`${BASE}/api/planning`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  }).then(parse);
-
-export const getWeather = (condition) =>
-  fetch(`${BASE}/api/weather-advisory?condition=${encodeURIComponent(condition)}`).then(parse);
-
-export const sendChat = (message, history) =>
-  fetch(`${BASE}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, history }),
-  }).then(parse);
+export const planProject = (payload) => postJson("/api/planning", payload);
+export const valueProperty = (payload) => postJson("/api/valuation", payload);
+export const dailyPlan = (payload) => postJson("/api/daily-plan", payload);
+export const weatherAdvisory = (payload) => postJson("/api/weather-advisory", payload);
+export const sendChat = (message, history) => postJson("/api/chat", { message, history });
