@@ -78,7 +78,19 @@ export default function Planning() {
           {plan.visualization_url && (
             <>
               <h4>Architectural visualization (concept)</h4>
-              <img className="preview" src={plan.visualization_url} alt="AI generated architectural concept" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+              <img
+                className="preview"
+                src={plan.visualization_url}
+                alt="AI generated architectural concept"
+                onError={(e) => {
+                  e.currentTarget.style.display = "none";
+                  const fallback = e.currentTarget.nextElementSibling;
+                  if (fallback) fallback.style.display = "block";
+                }}
+              />
+              <p className="muted" style={{ display: "none", fontSize: "0.85rem", fontStyle: "italic" }}>
+                Architectural concept render service is currently slow or unavailable.
+              </p>
             </>
           )}
           {plan.summary && <p className="summary">{plan.summary}</p>}

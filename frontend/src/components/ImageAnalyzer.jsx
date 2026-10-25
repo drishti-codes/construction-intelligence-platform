@@ -47,24 +47,138 @@ function CrackResult({ r }) {
   );
 }
 
+const MAX_DIMENSION = 1280;
+
+// Resize large images in browser via Canvas before transmission
+function downsampleImage(file, maxDimension = MAX_DIMENSION) {
+  if (!file || !(file instanceof Blob)) return Promise.resolve(file);
+  if (file._downsampled) return Promise.resolve(file);
+
+  const type = file.type || "image/jpeg";
+  if (!type.startsWith("image/")) return Promise.resolve(file);
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const { width, height } = img;
+
+      // Keep original if dimensions are already within limit and file size is <= 1.5 MB
+      if (width <= maxDimension && height <= maxDimension && file.size <= 1.5 * 1024 * 1024) {
+        resolve(file);
+        return;
+      }
+
+      // Preserve aspect ratio
+      let targetWidth = width;
+      let targetHeight = height;
+      if (width > maxDimension || height > maxDimension) {
+        if (width >= height) {
+          targetHeight = Math.round((height * maxDimension) / width);
+          targetWidth = maxDimension;
+        } else {
+          targetWidth = Math.round((width * maxDimension) / height);
+          targetHeight = maxDimension;
+        }
+      }
+
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(file);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+        // Keep PNG format for PNGs (lossless/transparency); use 0.85 quality for JPEG and WebP
+        const outputType = type === "image/png" ? "image/png" : (type === "image/webp" ? "image/webp" : "image/jpeg");
+        const quality = outputType === "image/png" ? undefined : 0.85;
+
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              resolve(file);
+              return;
+            }
+            if (blob.size >= file.size && width <= maxDimension && height <= maxDimension) {
+              resolve(file);
+              return;
+            }
+            const fileName = file.name || `image.${outputType.split("/")[1] || "jpg"}`;
+            const resizedFile = new File([blob], fileName, {
+              type: outputType,
+              lastModified: Date.now(),
+            });
+            resizedFile._downsampled = true;
+            resolve(resizedFile);
+          },
+          outputType,
+          quality
+        );
+      } catch {
+        resolve(file);
+      }
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+
+    img.src = url;
+  });
+}
+
 function ImageAnalyzer({ endpoint, title, hint, Result }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [description, setDescription] = useState("");
+  const [fileInfo, setFileInfo] = useState("");
   const [localError, setLocalError] = useState("");
   const { data, error, loading, run } = useRequest(analyzeImage);
 
-  const onFile = (e) => {
+  const onFile = async (e) => {
     const f = e.target.files?.[0] || null;
     if (preview) URL.revokeObjectURL(preview);
+    setFileInfo("");
+    if (!f) {
+      setFile(null);
+      setPreview(null);
+      return;
+    }
+    setPreview(URL.createObjectURL(f));
     setFile(f);
-    setPreview(f ? URL.createObjectURL(f) : null);
+    try {
+      const optimized = await downsampleImage(f);
+      setFile(optimized);
+      if (optimized !== f && optimized.size < f.size) {
+        setFileInfo(`Image optimized: ${(f.size / (1024 * 1024)).toFixed(2)} MB -> ${(optimized.size / 1024).toFixed(0)} KB`);
+      } else {
+        setFileInfo(`Size: ${(f.size / 1024).toFixed(0)} KB`);
+      }
+    } catch {
+      setFile(f);
+    }
   };
 
-  const submit = () => {
+  const submit = async () => {
     setLocalError("");
     if (!file && !description.trim()) return setLocalError("Upload an image or write a description first.");
-    run(endpoint, file, description);
+    let uploadFile = file;
+    if (file && !file._downsampled) {
+      try {
+        uploadFile = await downsampleImage(file);
+      } catch {
+        uploadFile = file;
+      }
+    }
+    run(endpoint, uploadFile, description);
   };
 
   return (
@@ -73,6 +187,7 @@ function ImageAnalyzer({ endpoint, title, hint, Result }) {
       <p className="muted">{hint}</p>
       <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onFile} />
       {preview && <img className="preview" src={preview} alt="Selected upload preview" />}
+      {fileInfo && <p className="muted" style={{ fontSize: "0.8rem", marginTop: "-4px" }}>{fileInfo}</p>}
       <textarea rows={3} placeholder="Optional: describe the site / location / observations" value={description} onChange={(e) => setDescription(e.target.value)} />
       <button onClick={submit} disabled={loading}>{loading ? "Analysing..." : "Analyse"}</button>
       <ErrorMsg error={localError || error} />

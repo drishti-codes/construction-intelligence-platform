@@ -34,7 +34,7 @@ label { display:flex; flex-direction:column; gap:4px; font-size:.9rem; color:var
 .bar { height:10px; background:#e2e8f0; border-radius:99px; overflow:hidden; } .bar div { height:100%; background:var(--brand); }
 table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
 .chat { height:260px; overflow:auto; border:1px solid var(--line); border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:8px; background:var(--bg); }
-.msg { max-width:80%; padding:8px 12px; border-radius:12px; } .msg.user { align-self:flex-end; background:var(--brand); color:#fff; } .msg.assistant { background:#fff; border:1px solid var(--line); }
+.msg { max-width:80%; padding:8px 12px; border-radius:12px; white-space: pre-wrap; word-break: break-word; } .msg.user { align-self:flex-end; background:var(--brand); color:#fff; } .msg.assistant { background:#fff; border:1px solid var(--line); }
 .status { font-size:.8rem; padding:4px 10px; border-radius:99px; } .status.live { background:#dcfce7; color:#166534; } .status.demo { background:#fef3c7; color:#92400e; } .status.off { background:#fee2e2; color:#991b1b; }
 footer { margin: 18px 0 6px; font-size:.8rem; color:var(--muted); text-align:center; }
 @media (max-width:600px){ .app{padding:10px;} h1{font-size:1.1rem;} }

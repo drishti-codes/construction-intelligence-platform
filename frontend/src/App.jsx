@@ -22,10 +22,33 @@ export default function App() {
   const [tab, setTab] = useState("safety");
   const [health, setHealth] = useState(null);
   const [offline, setOffline] = useState(false);
+  const [checking, setChecking] = useState(false);
+
+  const checkHealth = () => {
+    setChecking(true);
+    getHealth()
+      .then((data) => {
+        setHealth(data);
+        setOffline(false);
+      })
+      .catch(() => {
+        setOffline(true);
+      })
+      .finally(() => {
+        setChecking(false);
+      });
+  };
 
   useEffect(() => {
-    getHealth().then(setHealth).catch(() => setOffline(true));
+    checkHealth();
   }, []);
+
+  // When offline, automatically poll every 8 seconds until the backend wakes up
+  useEffect(() => {
+    if (!offline) return;
+    const interval = setInterval(checkHealth, 8000);
+    return () => clearInterval(interval);
+  }, [offline]);
 
   const Active = TABS.find((t) => t[0] === tab)[2];
 
@@ -37,7 +60,20 @@ export default function App() {
           {offline ? "Backend offline" : health ? `AI: ${health.ai_mode}` : "Connecting..."}
         </span>
       </header>
-      {offline && <div className="error">Cannot reach the backend. Start it with: uvicorn main:app --port 8000 (or wait ~50 s if the hosted server is waking up, then reload).</div>}
+      {offline && (
+        <div className="error" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+          <span>Cannot reach the backend (Render free tier may take ~50 s to wake up). Auto-retrying...</span>
+          <button
+            type="button"
+            className="secondary"
+            style={{ padding: "4px 12px", fontSize: "0.85rem", margin: 0 }}
+            onClick={checkHealth}
+            disabled={checking}
+          >
+            {checking ? "Checking..." : "Retry now"}
+          </button>
+        </div>
+      )}
       <nav>
         {TABS.map(([id, label]) => (
           <button key={id} className={tab === id ? "tab active" : "tab"} onClick={() => setTab(id)}>{label}</button>

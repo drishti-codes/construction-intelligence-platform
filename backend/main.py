@@ -58,7 +58,7 @@ app.add_middleware(
 
     CORSMiddleware,
 
-    allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if origin.strip()],
+    allow_origins=[origin.strip().rstrip("/") for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",") if origin.strip()],
 
     allow_methods=["*"],
 
@@ -495,11 +495,18 @@ class WeatherAdvisory(Lenient):
 
 # ---- chatbot
 
+class ChatMessage(BaseModel):
+
+    role: str = Field(default="user", max_length=30)
+
+    content: str = Field(default="", max_length=2500)
+
+
 class ChatRequest(BaseModel):
 
     message: str = Field(min_length=1, max_length=2000)
 
-    history: List[Dict[str, str]] = []
+    history: List[ChatMessage] = Field(default=[], max_length=30)
 
 
 class ChatReply(Lenient):
@@ -541,21 +548,38 @@ RULES:
 
 MODEL_NAME = lambda: os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
+_CACHED_CLIENT = None
+_CACHED_KEY = None
+
 
 def _get_client():
 
-    """Return a google-genai client, or None when no API key is configured."""
+    """Return a cached google-genai client, or None when no API key is configured."""
+
+    global _CACHED_CLIENT, _CACHED_KEY
 
     key = os.getenv("GEMINI_API_KEY")
 
     if not key:
 
+        _CACHED_CLIENT = None
+
+        _CACHED_KEY = None
+
         return None
+
+    if _CACHED_CLIENT is not None and _CACHED_KEY == key:
+
+        return _CACHED_CLIENT
 
     from google import genai
 
 
-    return genai.Client(api_key=key)
+    _CACHED_CLIENT = genai.Client(api_key=key)
+
+    _CACHED_KEY = key
+
+    return _CACHED_CLIENT
 
 
 def _is_transient(exc: Exception) -> bool:
@@ -595,11 +619,13 @@ def _generate_json(client, contents, feature: str = "general") -> dict:
         models.append(backup)
 
 
+    max_attempts = 2
+
     last_exc: Optional[Exception] = None
 
     for model in models:
 
-        for attempt in range(3):
+        for attempt in range(max_attempts):
 
             try:
 
@@ -637,7 +663,9 @@ def _generate_json(client, contents, feature: str = "general") -> dict:
 
                     break
 
-                time.sleep(1.5 * (attempt + 1))
+                if attempt < max_attempts - 1:
+
+                    time.sleep(1.0 * (attempt + 1))
 
     raise last_exc  # type: ignore[misc]
 
@@ -672,7 +700,7 @@ def run_ai(feature: str, prompt: str, image: Optional[Image.Image], schema, fall
         return _fallback(fallback_fn, f"AI unavailable ({_err(exc)}) - showing rule-based / demo output.")
 
 
-async def load_image(file: Optional[UploadFile]) -> Optional[Image.Image]:
+def load_image(file: Optional[UploadFile]) -> Optional[Image.Image]:
 
     if file is None or not file.filename:
 
@@ -682,7 +710,15 @@ async def load_image(file: Optional[UploadFile]) -> Optional[Image.Image]:
 
         raise HTTPException(415, "Unsupported file type. Upload a JPG, PNG or WEBP image.")
 
-    data = await file.read(MAX_IMAGE_BYTES + 1)
+    try:
+
+        file.file.seek(0)
+
+    except Exception:
+
+        pass
+
+    data = file.file.read(MAX_IMAGE_BYTES + 1)
 
     if not data:
 
@@ -804,9 +840,9 @@ def demo_safety() -> dict:
 
 @app.post("/api/safety", response_model=SafetyReport)
 
-async def safety(image: Optional[UploadFile] = File(None), description: str = Form("")):
+def safety(image: Optional[UploadFile] = File(None), description: str = Form("")):
 
-    img = await load_image(image)
+    img = load_image(image)
 
     if img is None and not description.strip():
 
@@ -871,9 +907,9 @@ def demo_crack() -> dict:
 
 @app.post("/api/cracks", response_model=CrackReport)
 
-async def cracks(image: Optional[UploadFile] = File(None), description: str = Form("")):
+def cracks(image: Optional[UploadFile] = File(None), description: str = Form("")):
 
-    img = await load_image(image)
+    img = load_image(image)
 
     if img is None and not description.strip():
 
@@ -1456,7 +1492,7 @@ def chat(req: ChatRequest):
 
         try:
 
-            ctx = "\n".join(f"{m.get('role', 'user')}: {m.get('content', '')}" for m in req.history[-6:])
+            ctx = "\n".join(f"{m.role}: {m.content}" for m in req.history[-6:])
 
             data = ChatReply(**_generate_json(client, CHAT_PROMPT.format(ctx=ctx, msg=req.message), "construction_chatbot"))
 
