@@ -1,51 +1,21 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { analyzeImage } from "../api.js";
-import { Banner, Bullets, DownloadJson, ErrorMsg, L, Metric, sevClass, useRequest } from "./ui.jsx";
-
-function SafetyResult({ r }) {
-  return (
-    <>
-      <div className="metrics">
-        <Metric label="Safety score">{r.safety_score}/100</Metric>
-        <Metric label="Status">{r.overall_status}</Metric>
-      </div>
-      <h4>PPE checklist</h4>
-      <ul className="plain">
-        {Object.entries(r.ppe || {}).map(([k, v]) => (
-          <li key={k}>{k.replace(/_/g, " ")}: <span className={sevClass(v === "Compliant" ? "low" : v === "Missing" ? "high" : "medium")}>{v}</span></li>
-        ))}
-      </ul>
-      <h4>Hazards</h4>
-      {L(r.hazards).length === 0 && <p className="muted">No hazards identified.</p>}
-      {L(r.hazards).map((h, i) => (
-        <div className="card-sm" key={i}>
-          <b>{h.name}</b> <span className={sevClass(h.severity)}>{h.severity}</span>
-          {h.remedy && <p>{h.remedy}</p>}
-        </div>
-      ))}
-      <Bullets title="Recommended PPE" items={r.recommended_ppe} />
-      <Bullets title="Safety guidelines" items={r.safety_guidelines} />
-      <Bullets title="Environmental risks" items={r.environmental_risks} />
-    </>
-  );
-}
-
-function CrackResult({ r }) {
-  return (
-    <>
-      <div className="metrics">
-        <Metric label="Crack type">{r.crack_type}</Metric>
-        <Metric label="Width (est.)">{r.estimated_width_mm} mm</Metric>
-        <Metric label="Severity"><span className={sevClass(r.severity)}>{r.severity}</span></Metric>
-        <Metric label="Urgency">{r.urgency}</Metric>
-      </div>
-      <Bullets title="Probable causes" items={r.probable_causes} />
-      <Bullets title="Potential risks" items={r.potential_risks} />
-      <Bullets title="Corrective actions (repair)" items={r.corrective_actions} />
-      <Bullets title="Preventive measures" items={r.preventive_measures} />
-    </>
-  );
-}
+import {
+  Banner,
+  Bullets,
+  CircularGauge,
+  DownloadJson,
+  ErrorMsg,
+  IconAlertTriangle,
+  IconCheckCircle,
+  IconCrack,
+  IconShield,
+  IconUpload,
+  L,
+  Metric,
+  sevClass,
+  useRequest,
+} from "./ui.jsx";
 
 const MAX_DIMENSION = 1280;
 
@@ -135,16 +105,116 @@ function downsampleImage(file, maxDimension = MAX_DIMENSION) {
   });
 }
 
+function SafetyResult({ r }) {
+  const ppeItems = Object.entries(r.ppe || {});
+
+  return (
+    <>
+      <div className="gauge-overview">
+        <CircularGauge score={r.safety_score} label="Safety Score" />
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          <div style={{ fontSize: "0.85rem", color: "var(--muted)", fontWeight: 600, textTransform: "uppercase" }}>
+            Audit Assessment
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span
+              className={`pill ${
+                r.overall_status === "Safe"
+                  ? "pill-low"
+                  : r.overall_status === "Unsafe"
+                  ? "pill-critical"
+                  : "pill-medium"
+              }`}
+              style={{ fontSize: "1rem", padding: "6px 16px" }}
+            >
+              {r.overall_status}
+            </span>
+          </div>
+          <p style={{ margin: "4px 0 0", fontSize: "0.88rem", color: "var(--muted)", maxWidth: "450px" }}>
+            {r.overall_status === "Safe"
+              ? "All critical safety protocols and standard PPE observed."
+              : r.overall_status === "Unsafe"
+              ? "Immediate action required: critical safety gaps or hazards detected."
+              : "Moderate compliance: address missing PPE or elevated hazard points."}
+          </p>
+        </div>
+      </div>
+
+      <div style={{ marginTop: "12px" }}>
+        <h4 style={{ margin: "0 0 10px", fontSize: "0.95rem", color: "var(--ink)" }}>PPE Compliance Checklist</h4>
+        <div className="ppe-grid">
+          {ppeItems.map(([item, status]) => {
+            const isCompliant = status === "Compliant";
+            const isMissing = status === "Missing";
+            return (
+              <div key={item} className="ppe-card">
+                <span className="ppe-name">{item.replace(/_/g, " ")}</span>
+                <span
+                  className={`pill ${
+                    isCompliant ? "pill-low" : isMissing ? "pill-critical" : "pill-medium"
+                  }`}
+                  style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}
+                >
+                  {isCompliant ? <IconCheckCircle size={13} color="currentColor" /> : isMissing ? <IconAlertTriangle size={13} color="currentColor" /> : null}
+                  {status}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ marginTop: "12px" }}>
+        <h4 style={{ margin: "0 0 10px", fontSize: "0.95rem", color: "var(--ink)" }}>Identified Hazards ({L(r.hazards).length})</h4>
+        {L(r.hazards).length === 0 && <p className="muted" style={{ fontStyle: "italic" }}>No critical site hazards identified.</p>}
+        {L(r.hazards).map((h, i) => (
+          <div key={i} className="hazard-card" style={{ borderLeftColor: h.severity === "Critical" || h.severity === "High" ? "#ef4444" : "#f59e0b" }}>
+            <div className="hazard-header">
+              <span className="hazard-title">{h.name}</span>
+              <span className={sevClass(h.severity)}>{h.severity} Severity</span>
+            </div>
+            {h.remedy && <p className="hazard-remedy"><strong>Remedy:</strong> {h.remedy}</p>}
+          </div>
+        ))}
+      </div>
+
+      <Bullets title="Recommended PPE Upgrades" items={r.recommended_ppe} />
+      <Bullets title="Site Safety Guidelines" items={r.safety_guidelines} />
+      <Bullets title="Environmental & Ambient Risks" items={r.environmental_risks} />
+    </>
+  );
+}
+
+function CrackResult({ r }) {
+  return (
+    <>
+      <div className="metrics">
+        <Metric label="Crack Type" icon={IconCrack}>{r.crack_type}</Metric>
+        <Metric label="Est. Width">{r.estimated_width_mm} mm</Metric>
+        <Metric label="Severity">
+          <span className={sevClass(r.severity)}>{r.severity}</span>
+        </Metric>
+        <Metric label="Urgency">{r.urgency}</Metric>
+      </div>
+      <Bullets title="Probable Root Causes" items={r.probable_causes} />
+      <Bullets title="Structural Risks & Hazards" items={r.potential_risks} />
+      <Bullets title="Recommended Corrective Repairs" items={r.corrective_actions} />
+      <Bullets title="Preventive Measures" items={r.preventive_measures} />
+    </>
+  );
+}
+
 function ImageAnalyzer({ endpoint, title, hint, Result }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [description, setDescription] = useState("");
   const [fileInfo, setFileInfo] = useState("");
+  const [dragActive, setDragActive] = useState(false);
   const [localError, setLocalError] = useState("");
+  const fileInputRef = useRef(null);
   const { data, error, loading, run } = useRequest(analyzeImage);
 
-  const onFile = async (e) => {
-    const f = e.target.files?.[0] || null;
+  const handleSelectedFile = async (f) => {
     if (preview) URL.revokeObjectURL(preview);
     setFileInfo("");
     if (!f) {
@@ -158,7 +228,7 @@ function ImageAnalyzer({ endpoint, title, hint, Result }) {
       const optimized = await downsampleImage(f);
       setFile(optimized);
       if (optimized !== f && optimized.size < f.size) {
-        setFileInfo(`Image optimized: ${(f.size / (1024 * 1024)).toFixed(2)} MB -> ${(optimized.size / 1024).toFixed(0)} KB`);
+        setFileInfo(`Image compressed: ${(f.size / (1024 * 1024)).toFixed(2)} MB -> ${(optimized.size / 1024).toFixed(0)} KB`);
       } else {
         setFileInfo(`Size: ${(f.size / 1024).toFixed(0)} KB`);
       }
@@ -167,9 +237,40 @@ function ImageAnalyzer({ endpoint, title, hint, Result }) {
     }
   };
 
+  const onFileChange = (e) => {
+    const f = e.target.files?.[0] || null;
+    handleSelectedFile(f);
+  };
+
+  const onDragOver = (e) => {
+    e.preventDefault();
+    setDragActive(true);
+  };
+
+  const onDragLeave = () => {
+    setDragActive(false);
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragActive(false);
+    const f = e.dataTransfer.files?.[0] || null;
+    if (f) handleSelectedFile(f);
+  };
+
+  const clearFile = () => {
+    if (preview) URL.revokeObjectURL(preview);
+    setFile(null);
+    setPreview(null);
+    setFileInfo("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const submit = async () => {
     setLocalError("");
-    if (!file && !description.trim()) return setLocalError("Upload an image or write a description first.");
+    if (!file && !description.trim()) {
+      return setLocalError("Please upload an inspection image or write a text description.");
+    }
     let uploadFile = file;
     if (file && !file._downsampled) {
       try {
@@ -183,19 +284,78 @@ function ImageAnalyzer({ endpoint, title, hint, Result }) {
 
   return (
     <section className="panel">
-      <h2>{title}</h2>
-      <p className="muted">{hint}</p>
-      <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onFile} />
-      {preview && <img className="preview" src={preview} alt="Selected upload preview" />}
-      {fileInfo && <p className="muted" style={{ fontSize: "0.8rem", marginTop: "-4px" }}>{fileInfo}</p>}
-      <textarea rows={3} placeholder="Optional: describe the site / location / observations" value={description} onChange={(e) => setDescription(e.target.value)} />
-      <button onClick={submit} disabled={loading}>{loading ? "Analysing..." : "Analyse"}</button>
+      <div className="panel-header">
+        <h2>{title}</h2>
+        <p>{hint}</p>
+      </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        style={{ display: "none" }}
+        onChange={onFileChange}
+      />
+
+      {!preview ? (
+        <div
+          className={`dropzone ${dragActive ? "drag-active" : ""}`}
+          onDragOver={onDragOver}
+          onDragLeave={onDragLeave}
+          onDrop={onDrop}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          <div className="dropzone-icon">
+            <IconUpload size={32} />
+          </div>
+          <p className="dropzone-text">Click to upload or drag & drop inspection photo</p>
+          <p className="dropzone-sub">Supported: JPG, PNG, WEBP &bull; Max 8 MB &bull; Client-side auto-downsampled</p>
+        </div>
+      ) : (
+        <div className="preview-card">
+          <img src={preview} alt="Inspection preview" />
+          <div className="preview-card-overlay">
+            <span className="file-pill">{fileInfo || "Ready for analysis"}</span>
+            <button
+              type="button"
+              className="secondary"
+              style={{ padding: "4px 10px", fontSize: "0.75rem", margin: 0, background: "rgba(255,255,255,0.9)" }}
+              onClick={clearFile}
+            >
+              Change Photo
+            </button>
+          </div>
+        </div>
+      )}
+
+      <label>
+        Context & Observations (Optional)
+        <textarea
+          rows={3}
+          placeholder="e.g. Scaffolding on 4th floor, slab casting in progress, outdoor exterior wall..."
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+      </label>
+
+      <button type="button" onClick={submit} disabled={loading}>
+        {loading ? (
+          <>
+            <span className="pulse-dot" style={{ backgroundColor: "#ffffff" }} />
+            <span>Analyzing Site Data...</span>
+          </>
+        ) : (
+          "Run AI Inspection"
+        )}
+      </button>
+
       <ErrorMsg error={localError || error} />
+
       {data && (
         <div className="result">
           <Banner r={data} />
           <Result r={data} />
-          {data.summary && <p className="summary">{data.summary}</p>}
+          {data.summary && <p className="summary-card">{data.summary}</p>}
           <DownloadJson data={data} name={endpoint} />
         </div>
       )}
@@ -204,8 +364,19 @@ function ImageAnalyzer({ endpoint, title, hint, Result }) {
 }
 
 export const SafetyTab = () => (
-  <ImageAnalyzer endpoint="safety" title="Site Safety & PPE Audit" hint="Upload a site photo to check PPE compliance, hazards and environmental risks." Result={SafetyResult} />
+  <ImageAnalyzer
+    endpoint="safety"
+    title="Site Safety & PPE Audit"
+    hint="Upload a jobsite photo to assess PPE compliance, detect hazards, and review OSHA/IS guidelines."
+    Result={SafetyResult}
+  />
 );
+
 export const CrackTab = () => (
-  <ImageAnalyzer endpoint="cracks" title="Crack Diagnostics" hint="Upload a wall or concrete photo to classify the crack, assess severity and get repair advice." Result={CrackResult} />
+  <ImageAnalyzer
+    endpoint="cracks"
+    title="Structural Crack Diagnostics"
+    hint="Upload a concrete or masonry photo to classify crack geometry, gauge severity, and get repair remedies."
+    Result={CrackResult}
+  />
 );
